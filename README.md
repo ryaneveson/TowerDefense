@@ -102,4 +102,99 @@ Execute the generation across the following phase sequence:
 3. **Phase 3 (Simulation Engine):** Implement `GameScene.swift` completely. Ensure the vector tracking math, ray target searches, and programmatic particle bursts are fully implemented without placeholders.
 4. **Phase 4 (UI Framework Overlay):** Build `ContentView.swift` and `TowerDefenseApp.swift` to securely bind the underlying scene environment variables to the graphical interface panels.
 
-*Proceed with full file generation now.*
+Here is the **Product Data Model (PDM)** and **Product Definition Matrix** for your Tower Defense application. This maps out how the data structures interact, how the game state changes, and the logical dependencies of the system so Cursor understands the underlying data flow.
+
+---
+
+## 1. Core Product Data Model (Entity Relations)
+
+The game relies on a clean, decoupled data architecture where the visual layer (`SKNode`) simply reflects the underlying state data structures.
+
+```
++-----------------------------------------------------------------+
+|                           GameSession                           |
++-----------------------------------------------------------------+
+| - id: UUID                                                      |
+| - gold: Int                                                     |
+| - lives: Int                                                    |
+| - currentWave: Int                                              |
+| - activeTowers: List<Tower>                                     |
+| - activeEnemies: List<Enemy>                                    |
++-------------------------------+---------------------------------+
+                                |
+        +-----------------------+-----------------------+
+        | 1:N                                           | 1:N
++-------v-------+                               +-------v-------+
+|     Tower     |                               |     Enemy     |
++---------------+                               +---------------+
+| - id: String  |                               | - id: UUID    |
+| - type: Enum  |                               | - type: Enum  |
+| - position: XY|                               | - health: Int |
+| - cooldown: DT|                               | - speed: Float|
+| - range: Float|                               | - waypoint:Int|
++-------+-------+                               +---------------+
+        | 1:N
++-------v-------+
+|  Projectile  |
++---------------+
+| - damage: Int |
+| - target: Enemy|
+| - speed: Float|
++---------------+
+
+```
+
+### Data Dictionary
+
+| Entity | Attribute | Data Type | Description |
+| --- | --- | --- | --- |
+| **GameSession** | `gold` | `Integer` | Player's balance for purchasing defenses. |
+|  | `lives` | `Integer` | Health of the player. Game over occurs at 0. |
+| **Tower** | `id` | `String (UUID)` | Unique identifier used to map cooldown timestamps. |
+|  | `isCamoDetectionActive` | `Boolean` | State flag altered exclusively by the Dart Monkey ability. |
+| **Enemy** | `waypointIndex` | `Integer` | Tracks the current track segment the enemy is traversing. |
+|  | `currentHealth` | `Integer` | Determines structural tier degradation (Blue $\rightarrow$ Red). |
+
+---
+
+## 2. State Transition Matrix
+
+The game engine operates under a strict finite state machine (FSM) to ensure UI overlays, inputs, and background calculations don't conflict.
+
+| Current State | Event/Trigger | Action Taken | Next State |
+| --- | --- | --- | --- |
+| **MainMenu** | User taps "Start Game" | Initialize `GameSession`, load map geometries. | **ActiveGameplay** |
+| **ActiveGameplay** | User selects tower menu cell | Highlight cell, activate placement bounding box logic. | **TowerPlacementMode** |
+| **TowerPlacementMode** | User taps valid coordinates | Deduct currency, instantiate `TowerNode`, clear selection. | **ActiveGameplay** |
+| **TowerPlacementMode** | User taps invalid/insufficient gold | Flash UI error warning, cancel selection. | **ActiveGameplay** |
+| **ActiveGameplay** | Enemy exits final waypoint | Deduct 1 unit from `lives`. Check if $\text{lives} \le 0$. | **ActiveGameplay** or **GameOver** |
+| **ActiveGameplay** | User taps active tower node | Read ID, evaluate cooldown matrix, execute special action if clear. | **ActiveGameplay** |
+| **ActiveGameplay** / **GameOver** | User hits "Reset" | Wipe active entity lists, restore default configurations. | **MainMenu** |
+
+---
+
+## 3. Precedence Diagram Method (PDM) / Implementation Dependency Map
+
+When tracking your development sequence or passing components to Cursor file by file, use this structural dependency logic:
+
+```
+[1. GameConfig Data Structures] 
+               │
+               ▼
+[2. GameViewModel State Bridge]
+               │
+               ▼
+[3. GameScene Graphics & Math Logic] ◄─── [Map Track Waypoints Layout]
+               │
+               ▼
+[4. ContentView SwiftUI HUD Canvas]
+               │
+               ▼
+[5. App Lifecycle Entry Manifest]
+
+```
+
+* **Task 1 (GameConfig):** Must be compiled first. No logic depends on UI, but all downstream files depend on these data primitives.
+* **Task 2 (GameViewModel):** Manages the reactive pipeline data binds. Completely decoupled from rendering loops.
+* **Task 3 (GameScene):** Imports vectors, handles spatial geometry, triggers soundless visual effects, and feeds score deltas back into Task 2.
+* **Task 4 (ContentView):** Wraps Task 3 inside a viewport container layer, binding interface interactors to Task 2 properties.
