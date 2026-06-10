@@ -16,7 +16,7 @@ extension SKColorCompatible {
     }
 }
 
-// MARK: - Enemy Node ("Glitch Bug")
+// MARK: - Enemy Node (Alien Swarm)
 
 final class EnemyNode: SKShapeNode {
     let id = UUID()
@@ -28,9 +28,15 @@ final class EnemyNode: SKShapeNode {
     /// Total track distance covered so far; used to rank "furthest progressed".
     private(set) var distanceTraveled: CGFloat = 0
 
-    var isCamo: Bool { originalType.isCamo && currentHealth > 0 }
+    /// Per-frame slow factor applied by gravity wells (1 = full speed). Reset each tick.
+    var slowMultiplier: CGFloat = 1.0
 
-    /// Speed reflects the current visible tier (a damaged Volt Beetle moves like a Glitch Mite).
+    var isCamo: Bool { originalType.isInvisible && currentHealth > 0 }
+    var isRobotic: Bool { originalType.isRobotic }
+
+    private var isRevealedByScan = false
+
+    /// Speed reflects the current visible tier (a damaged Blob moves like a Pod).
     var currentSpeed: CGFloat {
         EnemyType.tier(forRemainingHealth: currentHealth, original: originalType).speed
     }
@@ -48,58 +54,123 @@ final class EnemyNode: SKShapeNode {
 
     required init?(coder aDecoder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// Rebuilds the programmatic glitch-bug chassis to match the current tier.
+    /// Deep Scan visual reveal — cloaked wisps brighten while a global scan runs.
+    func setRevealed(_ revealed: Bool) {
+        guard originalType.isInvisible, revealed != isRevealedByScan else { return }
+        isRevealedByScan = revealed
+        alpha = revealed ? 0.85 : 0.45
+    }
+
+    /// Rebuilds the programmatic alien chassis to match the current tier.
     private func redrawBody() {
         removeAllChildren()
         let tier = EnemyType.tier(forRemainingHealth: currentHealth, original: originalType)
         let r = tier.radius
-
-        // Hexagonal chassis.
-        let chassis = CGMutablePath()
-        for i in 0..<6 {
-            let angle = CGFloat(i) * .pi / 3 + .pi / 6
-            let pt = CGPoint(x: cos(angle) * r, y: sin(angle) * r)
-            if i == 0 { chassis.move(to: pt) } else { chassis.addLine(to: pt) }
-        }
-        chassis.closeSubpath()
-        path = chassis
-
         let c = tier.color
-        fillColor = SKColor(red: c.red, green: c.green, blue: c.blue, alpha: 0.92)
-        strokeColor = c.brighterSKColor
         lineWidth = 2
         glowWidth = 3
+        fillColor = SKColor(red: c.red, green: c.green, blue: c.blue, alpha: 0.92)
+        strokeColor = c.brighterSKColor
+        alpha = 1.0
 
-        // Bright energy core.
-        let core = SKShapeNode(circleOfRadius: r * 0.40)
-        core.fillColor = SKColor(white: 1.0, alpha: 0.85)
-        core.strokeColor = .clear
-        core.zPosition = 1
-        addChild(core)
-
-        // Splayed legs on both flanks.
-        for side in [CGFloat(-1), CGFloat(1)] {
-            for i in -1...1 {
-                let leg = SKShapeNode(rectOf: CGSize(width: r * 0.85, height: 2), cornerRadius: 1)
-                leg.fillColor = strokeColor
-                leg.strokeColor = .clear
-                leg.position = CGPoint(x: side * r * 0.95, y: CGFloat(i) * r * 0.55)
-                leg.zRotation = side * CGFloat(i) * 0.45
-                addChild(leg)
+        switch tier {
+        case .pod:
+            // Round alien pod with a dome highlight and stabilizer fins.
+            path = CGPath(ellipseIn: CGRect(x: -r, y: -r, width: r * 2, height: r * 2), transform: nil)
+            let dome = SKShapeNode(ellipseOf: CGSize(width: r * 1.1, height: r * 0.6))
+            dome.fillColor = SKColor(white: 1.0, alpha: 0.35)
+            dome.strokeColor = .clear
+            dome.position = CGPoint(x: 0, y: r * 0.35)
+            addChild(dome)
+            for side in [CGFloat(-1), CGFloat(1)] {
+                let fin = SKShapeNode(rectOf: CGSize(width: 4, height: r * 0.8), cornerRadius: 2)
+                fin.fillColor = strokeColor
+                fin.strokeColor = .clear
+                fin.position = CGPoint(x: side * r * 0.85, y: -r * 0.5)
+                fin.zRotation = side * 0.5
+                addChild(fin)
             }
-        }
 
-        // Phantom Crawlers shimmer behind a cloak ring.
-        if originalType.isCamo {
-            alpha = 0.55
+        case .blob:
+            // Wobbling cosmic blob with inner bubbles.
+            path = CGPath(ellipseIn: CGRect(x: -r, y: -r, width: r * 2, height: r * 2), transform: nil)
+            for (dx, dy, br) in [(-0.35, 0.25, 0.30), (0.3, -0.2, 0.22), (0.05, 0.4, 0.16)] {
+                let bubble = SKShapeNode(circleOfRadius: r * CGFloat(br))
+                bubble.fillColor = SKColor(white: 1.0, alpha: 0.30)
+                bubble.strokeColor = .clear
+                bubble.position = CGPoint(x: r * CGFloat(dx), y: r * CGFloat(dy))
+                addChild(bubble)
+            }
+            if action(forKey: "pulse") == nil {
+                run(.repeatForever(.sequence([
+                    .scale(to: 1.07, duration: 0.5),
+                    .scale(to: 0.94, duration: 0.5)
+                ])), withKey: "pulse")
+            }
+
+        case .drone:
+            // Angular robotic chassis with a glowing thruster.
+            let chassis = CGMutablePath()
+            chassis.move(to: CGPoint(x: 0, y: r * 1.1))
+            chassis.addLine(to: CGPoint(x: r * 0.9, y: -r * 0.8))
+            chassis.addLine(to: CGPoint(x: 0, y: -r * 0.35))
+            chassis.addLine(to: CGPoint(x: -r * 0.9, y: -r * 0.8))
+            chassis.closeSubpath()
+            path = chassis
+            let thruster = SKShapeNode(ellipseOf: CGSize(width: r * 0.55, height: r * 0.35))
+            thruster.fillColor = SKColor(red: 1.0, green: 0.55, blue: 0.15, alpha: 0.95)
+            thruster.strokeColor = .clear
+            thruster.glowWidth = 4
+            thruster.position = CGPoint(x: 0, y: -r * 0.75)
+            addChild(thruster)
+            let core = SKShapeNode(circleOfRadius: r * 0.28)
+            core.fillColor = SKColor(red: 1.0, green: 0.35, blue: 0.25, alpha: 1.0)
+            core.strokeColor = .clear
+            core.position = CGPoint(x: 0, y: r * 0.1)
+            addChild(core)
+
+        case .wisp:
+            // Cloaked hexagonal energy entity.
+            let hex = CGMutablePath()
+            for i in 0..<6 {
+                let angle = CGFloat(i) * .pi / 3 + .pi / 6
+                let pt = CGPoint(x: cos(angle) * r, y: sin(angle) * r)
+                if i == 0 { hex.move(to: pt) } else { hex.addLine(to: pt) }
+            }
+            hex.closeSubpath()
+            path = hex
+            let core = SKShapeNode(circleOfRadius: r * 0.4)
+            core.fillColor = SKColor(white: 1.0, alpha: 0.8)
+            core.strokeColor = .clear
+            addChild(core)
             let cloak = SKShapeNode(circleOfRadius: r * 1.3)
             cloak.fillColor = .clear
             cloak.strokeColor = SKColor(red: 0.75, green: 0.55, blue: 1.0, alpha: 0.55)
             cloak.lineWidth = 1.5
-            cloak.zPosition = 2
             addChild(cloak)
-        } else {
-            alpha = 1.0
+            alpha = isRevealedByScan ? 0.85 : 0.45
+
+        case .behemoth:
+            // Armored void octagon with a burning core.
+            let oct = CGMutablePath()
+            for i in 0..<8 {
+                let angle = CGFloat(i) * .pi / 4 + .pi / 8
+                let pt = CGPoint(x: cos(angle) * r, y: sin(angle) * r)
+                if i == 0 { oct.move(to: pt) } else { oct.addLine(to: pt) }
+            }
+            oct.closeSubpath()
+            path = oct
+            lineWidth = 3.5
+            let armor = SKShapeNode(circleOfRadius: r * 0.68)
+            armor.fillColor = .clear
+            armor.strokeColor = SKColor(white: 0.15, alpha: 0.9)
+            armor.lineWidth = 3
+            addChild(armor)
+            let core = SKShapeNode(circleOfRadius: r * 0.35)
+            core.fillColor = SKColor(red: 1.0, green: 0.45, blue: 0.2, alpha: 1.0)
+            core.strokeColor = .clear
+            core.glowWidth = 5
+            addChild(core)
         }
     }
 
@@ -117,7 +188,7 @@ final class EnemyNode: SKShapeNode {
 
     /// Advances along the waypoint path. Returns true when the enemy exits the final waypoint.
     func advance(deltaTime: TimeInterval) -> Bool {
-        var remainingStep = currentSpeed * 60 * CGFloat(deltaTime)
+        var remainingStep = currentSpeed * slowMultiplier * 60 * CGFloat(deltaTime)
 
         while remainingStep > 0 {
             guard waypointIndex < waypoints.count else { return true }
@@ -145,20 +216,30 @@ final class EnemyNode: SKShapeNode {
     }
 }
 
-// MARK: - Tower Node (Sci-Fi Turret)
+// MARK: - Tower Node (Space Defense)
 
 final class TowerNode: SKShapeNode {
     let id = UUID().uuidString
     let type: TowerType
     var lastFireTime: TimeInterval = 0
 
-    /// Upgrade tiers (alpha = fire rate, beta = damage/range).
+    /// Upgrade tiers (alpha = speed/utility, beta = power).
     private(set) var pathALevel: Int = 0
     private(set) var pathBLevel: Int = 0
 
-    /// Cloak detection flag — altered exclusively by the Phase Scanner ability.
+    /// Temporary cloak detection from the laser's Phase Scanner ability.
     var isCamoDetectionActive: Bool = false
     var camoDetectionEndTime: TimeInterval = 0
+
+    /// Plasma Overload double-damage window.
+    var damageBuffEndTime: TimeInterval = 0
+
+    /// Gravity Stasis Field window.
+    var stasisEndTime: TimeInterval = 0
+
+    /// Per-frame aura state computed by the scene.
+    var isScannerBuffed: Bool = false
+    var auraRateFactor: Double = 1.0
 
     var isSelected: Bool = false { didSet { refreshRangeRing() } }
 
@@ -171,6 +252,31 @@ final class TowerNode: SKShapeNode {
     }
     var effectiveRange: CGFloat {
         type.range * CGFloat(pow(TowerType.betaRangeFactor, Double(pathBLevel)))
+    }
+
+    /// Damage including any active Overload buff.
+    func currentDamage(at time: TimeInterval) -> Int {
+        effectiveDamage * (time < damageBuffEndTime ? 2 : 1)
+    }
+
+    /// Gravity slow including alpha upgrades, or stasis override.
+    func currentSlowStrength(at time: TimeInterval) -> Double {
+        if time < stasisEndTime { return 0.9 }
+        return min(0.85, type.slowStrength + Double(pathALevel) * TowerType.alphaEffectBonus)
+    }
+
+    /// Alien Tech haste including alpha upgrades.
+    var currentHasteStrength: Double {
+        min(0.6, type.hasteStrength + Double(pathALevel) * TowerType.alphaEffectBonus)
+    }
+
+    /// Whether this tower can target cloaked enemies right now.
+    func canSeeInvisible(globalReveal: Bool) -> Bool {
+        type.detectsInvisibleBase
+            || (type == .laser && pathBLevel >= 3)
+            || isCamoDetectionActive
+            || isScannerBuffed
+            || globalReveal
     }
 
     private let rangeCircle = SKShapeNode()
@@ -212,47 +318,176 @@ final class TowerNode: SKShapeNode {
         turretHead.zPosition = 2
         addChild(turretHead)
 
+        let tint = type.projectileTint.skColor
+
         switch type {
-        case .dartNode:
-            // Long precision beam barrel with an emitter lens.
-            let barrel = SKShapeNode(rectOf: CGSize(width: 7, height: 24), cornerRadius: 3)
+        case .laser, .plasma:
+            // Beam barrel with an emitter lens (plasma's is stockier).
+            let length: CGFloat = type == .laser ? 24 : 18
+            let width: CGFloat = type == .laser ? 7 : 11
+            let barrel = SKShapeNode(rectOf: CGSize(width: width, height: length), cornerRadius: 3)
             barrel.fillColor = SKColor(white: 0.15, alpha: 1.0)
             barrel.strokeColor = SKColor(white: 0.45, alpha: 1.0)
             barrel.position = CGPoint(x: 0, y: r * 0.85)
             turretHead.addChild(barrel)
-
-            let lens = SKShapeNode(circleOfRadius: 3.5)
-            lens.fillColor = type.projectileTint.skColor
+            let lens = SKShapeNode(circleOfRadius: type == .laser ? 3.5 : 5)
+            lens.fillColor = tint
             lens.strokeColor = .clear
             lens.glowWidth = 3
-            lens.position = CGPoint(x: 0, y: r * 0.85 + 12)
+            lens.position = CGPoint(x: 0, y: r * 0.85 + length / 2)
             turretHead.addChild(lens)
 
-        case .tackNode:
-            // Eight stub emitters in a radial array.
+        case .darkMatter:
+            // Collapsed-core orb wrapped in a dark ring.
+            let orb = SKShapeNode(circleOfRadius: r * 0.55)
+            orb.fillColor = tint
+            orb.strokeColor = SKColor(white: 1.0, alpha: 0.9)
+            orb.lineWidth = 1.5
+            orb.glowWidth = 6
+            turretHead.addChild(orb)
+            let ring = SKShapeNode(circleOfRadius: r * 0.8)
+            ring.fillColor = .clear
+            ring.strokeColor = SKColor(white: 0.05, alpha: 1.0)
+            ring.lineWidth = 3
+            turretHead.addChild(ring)
+            orb.run(.repeatForever(.sequence([
+                .scale(to: 1.18, duration: 0.5),
+                .scale(to: 0.9, duration: 0.5)
+            ])))
+
+        case .emp:
+            // Radial emitter stubs.
             for i in 0..<8 {
                 let angle = CGFloat(i) * (.pi / 4)
                 let stub = SKShapeNode(rectOf: CGSize(width: 5, height: 12), cornerRadius: 2)
                 stub.fillColor = SKColor(white: 0.15, alpha: 1.0)
-                stub.strokeColor = type.projectileTint.skColor
+                stub.strokeColor = tint
                 stub.lineWidth = 1
                 stub.position = CGPoint(x: cos(angle) * (r + 2), y: sin(angle) * (r + 2))
                 stub.zRotation = angle - .pi / 2
                 turretHead.addChild(stub)
             }
 
-        case .superNode:
-            // Pulsing plasma orb.
-            let orb = SKShapeNode(circleOfRadius: r * 0.55)
-            orb.fillColor = type.projectileTint.skColor
-            orb.strokeColor = SKColor(white: 1.0, alpha: 0.9)
-            orb.lineWidth = 1.5
-            orb.glowWidth = 5
-            turretHead.addChild(orb)
-            orb.run(.repeatForever(.sequence([
-                .scale(to: 1.18, duration: 0.6),
-                .scale(to: 0.92, duration: 0.6)
+        case .missile:
+            // Twin launch tubes.
+            for side in [CGFloat(-1), CGFloat(1)] {
+                let tube = SKShapeNode(rectOf: CGSize(width: 7, height: 20), cornerRadius: 3)
+                tube.fillColor = SKColor(white: 0.18, alpha: 1.0)
+                tube.strokeColor = tint
+                tube.lineWidth = 1
+                tube.position = CGPoint(x: side * 6, y: r * 0.8)
+                turretHead.addChild(tube)
+            }
+
+        case .ion:
+            // Tesla spire with three arc prongs.
+            let rod = SKShapeNode(rectOf: CGSize(width: 4, height: r * 1.3), cornerRadius: 2)
+            rod.fillColor = SKColor(white: 0.3, alpha: 1.0)
+            rod.strokeColor = .clear
+            rod.position = CGPoint(x: 0, y: r * 0.5)
+            turretHead.addChild(rod)
+            for i in 0..<3 {
+                let angle = CGFloat(i) * (2 * .pi / 3) + .pi / 2
+                let prong = SKShapeNode(circleOfRadius: 3.5)
+                prong.fillColor = tint
+                prong.strokeColor = .clear
+                prong.glowWidth = 3
+                prong.position = CGPoint(x: cos(angle) * r * 0.7, y: sin(angle) * r * 0.7)
+                turretHead.addChild(prong)
+            }
+
+        case .gravity:
+            // Concentric distortion rings, the outer one slowly rotating.
+            let inner = SKShapeNode(circleOfRadius: r * 0.5)
+            inner.fillColor = tint.withAlphaComponent(0.5)
+            inner.strokeColor = tint
+            inner.glowWidth = 4
+            turretHead.addChild(inner)
+            let outer = SKShapeNode(ellipseOf: CGSize(width: r * 2.2, height: r * 1.4))
+            outer.fillColor = .clear
+            outer.strokeColor = tint.withAlphaComponent(0.8)
+            outer.lineWidth = 2
+            turretHead.addChild(outer)
+            outer.run(.repeatForever(.rotate(byAngle: .pi * 2, duration: 5)))
+
+        case .scanner:
+            // Sensor dish on a mast, sweeping a pulse.
+            let mast = SKShapeNode(rectOf: CGSize(width: 4, height: r), cornerRadius: 2)
+            mast.fillColor = SKColor(white: 0.3, alpha: 1.0)
+            mast.strokeColor = .clear
+            mast.position = CGPoint(x: 0, y: r * 0.4)
+            turretHead.addChild(mast)
+            let dishPath = CGMutablePath()
+            dishPath.addArc(center: .zero, radius: r * 0.7,
+                            startAngle: .pi * 0.15, endAngle: .pi * 0.85, clockwise: false)
+            let dish = SKShapeNode(path: dishPath)
+            dish.strokeColor = tint
+            dish.lineWidth = 3
+            dish.glowWidth = 2
+            dish.position = CGPoint(x: 0, y: r * 0.75)
+            turretHead.addChild(dish)
+            let pulse = SKShapeNode(circleOfRadius: r)
+            pulse.fillColor = .clear
+            pulse.strokeColor = tint.withAlphaComponent(0.5)
+            pulse.lineWidth = 1.5
+            addChild(pulse)
+            pulse.zPosition = 1
+            pulse.run(.repeatForever(.sequence([
+                .group([.scale(to: 2.2, duration: 1.6), .fadeOut(withDuration: 1.6)]),
+                .run { pulse.setScale(1); pulse.alpha = 1 }
             ])))
+
+        case .satellite:
+            // Uplink station: solar panels flanking a center dish.
+            for side in [CGFloat(-1), CGFloat(1)] {
+                let panel = SKShapeNode(rectOf: CGSize(width: r * 0.9, height: r * 0.55), cornerRadius: 2)
+                panel.fillColor = SKColor(red: 0.12, green: 0.20, blue: 0.40, alpha: 1.0)
+                panel.strokeColor = tint
+                panel.lineWidth = 1
+                panel.position = CGPoint(x: side * r * 0.95, y: 0)
+                turretHead.addChild(panel)
+            }
+            let dish = SKShapeNode(circleOfRadius: r * 0.4)
+            dish.fillColor = SKColor(white: 0.85, alpha: 1.0)
+            dish.strokeColor = SKColor(white: 0.4, alpha: 1.0)
+            dish.glowWidth = 2
+            turretHead.addChild(dish)
+
+        case .quantum:
+            // Phase prism: nested glowing diamonds.
+            let outerDiamond = SKShapeNode(rectOf: CGSize(width: r * 1.5, height: r * 1.5), cornerRadius: 3)
+            outerDiamond.zRotation = .pi / 4
+            outerDiamond.fillColor = SKColor(white: 0.12, alpha: 1.0)
+            outerDiamond.strokeColor = tint
+            outerDiamond.lineWidth = 2
+            outerDiamond.glowWidth = 2
+            turretHead.addChild(outerDiamond)
+            let innerDiamond = SKShapeNode(rectOf: CGSize(width: r * 0.7, height: r * 0.7), cornerRadius: 2)
+            innerDiamond.zRotation = .pi / 4
+            innerDiamond.fillColor = tint
+            innerDiamond.strokeColor = .clear
+            innerDiamond.glowWidth = 4
+            turretHead.addChild(innerDiamond)
+
+        case .alien:
+            // Organic spire with orbiting motes.
+            let orb = SKShapeNode(circleOfRadius: r * 0.5)
+            orb.fillColor = tint.withAlphaComponent(0.8)
+            orb.strokeColor = tint
+            orb.glowWidth = 4
+            turretHead.addChild(orb)
+            let orbiter = SKNode()
+            for i in 0..<2 {
+                let mote = SKShapeNode(circleOfRadius: 4)
+                mote.fillColor = SKColor(white: 1.0, alpha: 0.9)
+                mote.strokeColor = .clear
+                mote.glowWidth = 2
+                let angle = CGFloat(i) * .pi
+                mote.position = CGPoint(x: cos(angle) * r * 0.95, y: sin(angle) * r * 0.95)
+                orbiter.addChild(mote)
+            }
+            turretHead.addChild(orbiter)
+            orbiter.run(.repeatForever(.rotate(byAngle: .pi * 2, duration: 3)))
         }
     }
 
@@ -274,7 +509,8 @@ final class TowerNode: SKShapeNode {
 
     /// Rebuilds the range ring to reflect effective range, selection, and scanner state.
     func refreshRangeRing() {
-        let radius = effectiveRange
+        // Satellite range covers the map; show a compact indicator instead.
+        let radius = min(effectiveRange, GameConfig.canvasWidth)
         rangeCircle.path = CGPath(ellipseIn: CGRect(x: -radius, y: -radius, width: radius * 2, height: radius * 2),
                                   transform: nil)
         if isCamoDetectionActive {
@@ -307,26 +543,35 @@ final class TowerNode: SKShapeNode {
     }
 }
 
-// MARK: - Projectile Node (Energy Bolt)
+// MARK: - Projectile Node (Energy Bolt / Rocket)
 
 final class ProjectileNode: SKShapeNode {
     let damage: Int
     let flightSpeed: CGFloat = 9.0
+    /// Area damage radius on impact (0 = direct hit only).
+    let splashRadius: CGFloat
+    /// EMP bolts deal double damage to robotic enemies.
+    let bonusVsRobotic: Bool
     weak var target: EnemyNode?
     /// Fallback direction used when the target dies mid-flight or for radial bursts.
     var direction: CGVector
 
-    init(from origin: CGPoint, target: EnemyNode?, direction: CGVector, damage: Int, tint: SKColor) {
+    init(from origin: CGPoint, target: EnemyNode?, direction: CGVector,
+         damage: Int, tint: SKColor, splashRadius: CGFloat = 0, bonusVsRobotic: Bool = false) {
         self.damage = damage
         self.target = target
         self.direction = direction
+        self.splashRadius = splashRadius
+        self.bonusVsRobotic = bonusVsRobotic
         super.init()
         position = origin
         zPosition = 8
         name = "projectile"
-        // Glowing energy bolt capsule.
-        path = CGPath(roundedRect: CGRect(x: -2, y: -9, width: 4, height: 18),
-                      cornerWidth: 2, cornerHeight: 2, transform: nil)
+        // Glowing energy bolt capsule (rockets are stockier).
+        let size: CGSize = splashRadius > 0 ? CGSize(width: 6, height: 16) : CGSize(width: 4, height: 18)
+        path = CGPath(roundedRect: CGRect(x: -size.width / 2, y: -size.height / 2,
+                                          width: size.width, height: size.height),
+                      cornerWidth: size.width / 2, cornerHeight: size.width / 2, transform: nil)
         fillColor = tint
         strokeColor = tint
         lineWidth = 1
@@ -350,6 +595,10 @@ final class GameScene: SKScene {
     /// Simulation clock — advances at gameSpeed multiples of wall time.
     private var gameTime: TimeInterval = 0
 
+    /// Global timed effects (abilities).
+    private var globalRevealEndTime: TimeInterval = 0
+    private var globalRateBuffEndTime: TimeInterval = 0
+
     // Wave / spawn automation state.
     private var spawnQueue: [EnemyType] = []
     private var timeSinceLastSpawn: TimeInterval = 0
@@ -367,29 +616,48 @@ final class GameScene: SKScene {
     override func didMove(to view: SKView) {
         backgroundColor = map.theme.background.skColor
         scaleMode = .aspectFit
-        drawScenery()
+        drawSpaceBackdrop()
         drawTrack()
         queueWave(1)
     }
 
-    private func drawScenery() {
-        // Programmatic terrain variation: scattered darker patches.
-        var generator = SeededGenerator(seed: 42)
-        let scenery = map.theme.scenery
-        for _ in 0..<40 {
-            let patch = SKShapeNode(ellipseOf: CGSize(width: CGFloat.random(in: 20...70, using: &generator),
-                                                      height: CGFloat.random(in: 12...40, using: &generator)))
-            patch.position = CGPoint(x: CGFloat.random(in: 0...GameConfig.canvasWidth, using: &generator),
+    /// Procedural deep-space backdrop: nebula clouds and a starfield.
+    private func drawSpaceBackdrop() {
+        var generator = SeededGenerator(seed: UInt64(map.totalWaves * 1000 + map.difficulty))
+
+        // Nebula clouds.
+        let nebula = map.theme.nebula
+        for _ in 0..<6 {
+            let cloud = SKShapeNode(ellipseOf: CGSize(width: CGFloat.random(in: 220...480, using: &generator),
+                                                      height: CGFloat.random(in: 140...320, using: &generator)))
+            cloud.position = CGPoint(x: CGFloat.random(in: 0...GameConfig.canvasWidth, using: &generator),
                                      y: CGFloat.random(in: 0...GameConfig.canvasHeight, using: &generator))
-            patch.fillColor = scenery.skColor
-            patch.strokeColor = .clear
-            patch.zPosition = 0
-            addChild(patch)
+            cloud.fillColor = nebula.skColor
+            cloud.strokeColor = .clear
+            cloud.zPosition = 0
+            cloud.zRotation = CGFloat.random(in: 0...(.pi), using: &generator)
+            addChild(cloud)
+        }
+
+        // Starfield.
+        for i in 0..<90 {
+            let star = SKShapeNode(circleOfRadius: CGFloat.random(in: 0.8...2.2, using: &generator))
+            star.position = CGPoint(x: CGFloat.random(in: 0...GameConfig.canvasWidth, using: &generator),
+                                    y: CGFloat.random(in: 0...GameConfig.canvasHeight, using: &generator))
+            star.fillColor = SKColor(white: 1.0, alpha: CGFloat.random(in: 0.3...0.9, using: &generator))
+            star.strokeColor = .clear
+            star.zPosition = 0.5
+            addChild(star)
+            if i % 8 == 0 {
+                star.run(.repeatForever(.sequence([
+                    .fadeAlpha(to: 0.15, duration: Double.random(in: 0.8...1.6, using: &generator)),
+                    .fadeAlpha(to: 0.9, duration: Double.random(in: 0.8...1.6, using: &generator))
+                ])))
+            }
         }
     }
 
-    /// Renders a visible thick track underneath the waypoint sequence,
-    /// finished with an energized neon center line.
+    /// Renders the flight corridor with an energized neon center line.
     private func drawTrack() {
         let trackPath = CGMutablePath()
         trackPath.move(to: map.waypoints[0])
@@ -423,18 +691,28 @@ final class GameScene: SKScene {
         addChild(centerLine)
     }
 
-    // MARK: Wave Spawning
+    // MARK: Wave Spawning & Difficulty
 
+    /// Wave composition scales with the sector difficulty and wave number:
+    /// early sectors are pods and blobs; drones arrive at difficulty 2;
+    /// cloaked wisps from difficulty 2-3; behemoths anchor the late campaign.
     private func queueWave(_ wave: Int) {
-        let count = GameConfig.baseEnemiesPerWave + wave * GameConfig.extraEnemiesPerWave
+        let d = map.difficulty
+        let count = GameConfig.baseEnemiesPerWave + wave * GameConfig.extraEnemiesPerWave + d * 2
         var queue: [EnemyType] = []
         for i in 0..<count {
-            if wave >= 3 && i % 5 == 4 {
-                queue.append(.camo)
+            if d >= 5 && i % 7 == 6 {
+                queue.append(.behemoth)
+            } else if d >= 4 && wave >= 4 && i % 9 == 8 {
+                queue.append(.behemoth)
+            } else if (d >= 3 && wave >= 3 && i % 5 == 4) || (d == 2 && wave >= 6 && i % 6 == 5) {
+                queue.append(.wisp)
+            } else if d >= 2 && wave >= 2 && i % 4 == 3 {
+                queue.append(.drone)
             } else if wave >= 2 && i % 2 == 1 {
-                queue.append(.blue)
+                queue.append(.blob)
             } else {
-                queue.append(.red)
+                queue.append(.pod)
             }
         }
         spawnQueue = queue
@@ -446,6 +724,11 @@ final class GameScene: SKScene {
         if waveInFlight {
             guard !spawnQueue.isEmpty else {
                 if enemies.isEmpty {
+                    if let viewModel, viewModel.currentWave >= map.totalWaves {
+                        waveInFlight = false
+                        DispatchQueue.main.async { viewModel.winMission() }
+                        return
+                    }
                     waveInFlight = false
                     timeSinceWaveEnded = 0
                 }
@@ -457,6 +740,9 @@ final class GameScene: SKScene {
                 let enemy = EnemyNode(type: spawnQueue.removeFirst(), waypoints: map.waypoints)
                 enemies.append(enemy)
                 addChild(enemy)
+                // Warp-in effect.
+                enemy.setScale(0.2)
+                enemy.run(.scale(to: 1.0, duration: 0.25))
             }
         } else {
             timeSinceWaveEnded += deltaTime
@@ -514,7 +800,7 @@ final class GameScene: SKScene {
                                   pathALevel: tower.pathALevel,
                                   pathBLevel: tower.pathBLevel,
                                   damage: tower.effectiveDamage,
-                                  range: Int(tower.effectiveRange.rounded()),
+                                  range: Int(min(tower.effectiveRange, 999).rounded()),
                                   fireRate: 1.0 / tower.effectiveCooldown)
         DispatchQueue.main.async { [weak viewModel] in
             viewModel?.selectedTowerInfo = info
@@ -537,7 +823,11 @@ final class GameScene: SKScene {
 
         tower.increaseUpgrade(path: path)
         let title = path == .alpha ? tower.type.pathATitle : tower.type.pathBTitle
-        flashStatus("\(title) upgraded to level \(level + 1)!")
+        if tower.type == .laser && path == .beta && tower.pathBLevel == 3 {
+            flashStatus("Tachyon Optics maxed — this Laser Turret now sees cloaked enemies!")
+        } else {
+            flashStatus("\(title) upgraded to level \(level + 1)!")
+        }
         publishPanel(for: tower)
     }
 
@@ -559,58 +849,39 @@ final class GameScene: SKScene {
         viewModel.recordAbilityUse(towerID: tower.id)
 
         switch tower.type {
-        case .dartNode:
-            executePhaseScanner(tower)
-        case .tackNode:
-            executeEMPShockwave(tower)
-        case .superNode:
-            executePlasmaStorm(tower)
+        case .laser:      executePhaseScanner(tower)
+        case .emp:        executeEMPShockwave(tower)
+        case .plasma:     executeOverload(tower)
+        case .missile:    executeBarrage(tower)
+        case .ion:        executeStormDischarge(tower)
+        case .gravity:    executeStasisField(tower)
+        case .scanner:    executeDeepScan(tower)
+        case .satellite:  executeOrbitalBombardment(tower)
+        case .quantum:    executePhaseLance(tower)
+        case .alien:      executeHarmonicSurge(tower)
+        case .darkMatter: executeSingularity(tower)
         }
     }
 
-    /// Quantum Laser: 8-second phase scanner revealing cloaked Phantoms.
     private func executePhaseScanner(_ tower: TowerNode) {
         tower.isCamoDetectionActive = true
         tower.camoDetectionEndTime = gameTime + tower.type.camoVisionDuration
         tower.refreshRangeRing()
-
-        let flare = SKShapeNode(circleOfRadius: tower.effectiveRange)
-        flare.position = tower.position
-        flare.fillColor = SKColor(red: 0.40, green: 0.95, blue: 1.0, alpha: 0.22)
-        flare.strokeColor = SKColor(red: 0.40, green: 0.95, blue: 1.0, alpha: 0.75)
-        flare.zPosition = 40
-        flare.setScale(0.1)
-        addChild(flare)
-        flare.run(.sequence([
-            .group([.scale(to: 1.0, duration: 0.35), .fadeOut(withDuration: 0.6)]),
-            .removeFromParent()
-        ]))
+        showExpandingRing(at: tower.position, radius: tower.effectiveRange,
+                          tint: SKColor(red: 0.40, green: 0.95, blue: 1.0, alpha: 0.8))
         flashStatus("Phase Scanner active for \(Int(tower.type.camoVisionDuration))s!")
     }
 
-    /// EMP Blaster: localized high-damage electromagnetic shockwave.
     private func executeEMPShockwave(_ tower: TowerNode) {
-        let ring = SKShapeNode(circleOfRadius: tower.effectiveRange)
-        ring.position = tower.position
-        ring.fillColor = SKColor(red: 1.0, green: 0.75, blue: 0.2, alpha: 0.28)
-        ring.strokeColor = SKColor(red: 1.0, green: 0.65, blue: 0.1, alpha: 0.9)
-        ring.lineWidth = 4
-        ring.glowWidth = 6
-        ring.zPosition = 40
-        ring.setScale(0.1)
-        addChild(ring)
-        ring.run(.sequence([
-            .group([.scale(to: 1.0, duration: 0.25), .fadeOut(withDuration: 0.45)]),
-            .removeFromParent()
-        ]))
-
+        showExpandingRing(at: tower.position, radius: tower.effectiveRange,
+                          tint: SKColor(red: 1.0, green: 0.65, blue: 0.1, alpha: 0.9))
         var totalReward = 0
-        // The shockwave hits every physical enemy inside the radius, cloaked included.
         for enemy in enemies {
             let dx = enemy.position.x - tower.position.x
             let dy = enemy.position.y - tower.position.y
             if sqrt(dx * dx + dy * dy) <= tower.effectiveRange {
-                let popped = enemy.applyDamage(tower.type.ringBurstDamage)
+                let dmg = enemy.isRobotic ? tower.type.ringBurstDamage * 2 : tower.type.ringBurstDamage
+                let popped = enemy.applyDamage(dmg)
                 totalReward += rewardForPops(enemy: enemy, popped: popped)
             }
         }
@@ -618,11 +889,110 @@ final class GameScene: SKScene {
         flashStatus("EMP Shockwave detonated!")
     }
 
-    /// Plasma Overlord: floods the display, dealing massive damage to all onscreen enemies.
-    private func executePlasmaStorm(_ tower: TowerNode) {
+    private func executeOverload(_ tower: TowerNode) {
+        tower.damageBuffEndTime = gameTime + 6
+        showExpandingRing(at: tower.position, radius: tower.type.bodyRadius * 3,
+                          tint: tower.type.projectileTint.skColor)
+        flashStatus("Plasma Overload — double damage for 6s!")
+    }
+
+    private func executeBarrage(_ tower: TowerNode) {
+        let canSee = tower.canSeeInvisible(globalReveal: gameTime < globalRevealEndTime)
+        let targets = enemies
+            .filter { enemy in
+                guard enemy.currentHealth > 0, (!enemy.isCamo || canSee) else { return false }
+                let dx = enemy.position.x - tower.position.x
+                let dy = enemy.position.y - tower.position.y
+                return sqrt(dx * dx + dy * dy) <= tower.effectiveRange
+            }
+            .sorted { $0.distanceTraveled > $1.distanceTraveled }
+            .prefix(5)
+
+        var totalReward = 0
+        for enemy in targets {
+            showExplosion(at: enemy.position, radius: tower.type.splashRadius,
+                          tint: tower.type.projectileTint.skColor)
+            totalReward += applySplashDamage(at: enemy.position, damage: 2,
+                                             radius: tower.type.splashRadius, bonusVsRobotic: false)
+        }
+        cleanUpDestroyedEnemies(rewarding: totalReward)
+        flashStatus("Missile Barrage launched!")
+    }
+
+    private func executeStormDischarge(_ tower: TowerNode) {
+        var totalReward = 0
+        for enemy in enemies {
+            let dx = enemy.position.x - tower.position.x
+            let dy = enemy.position.y - tower.position.y
+            if sqrt(dx * dx + dy * dy) <= tower.effectiveRange {
+                showLightning(from: tower.position, to: enemy.position,
+                              tint: tower.type.projectileTint.skColor)
+                let popped = enemy.applyDamage(2)
+                totalReward += rewardForPops(enemy: enemy, popped: popped)
+            }
+        }
+        cleanUpDestroyedEnemies(rewarding: totalReward)
+        flashStatus("Storm Discharge!")
+    }
+
+    private func executeStasisField(_ tower: TowerNode) {
+        tower.stasisEndTime = gameTime + 4
+        showExpandingRing(at: tower.position, radius: tower.effectiveRange,
+                          tint: tower.type.projectileTint.skColor)
+        flashStatus("Stasis Field — enemies nearly frozen for 4s!")
+    }
+
+    private func executeDeepScan(_ tower: TowerNode) {
+        globalRevealEndTime = gameTime + 10
+        showExpandingRing(at: tower.position, radius: GameConfig.canvasWidth,
+                          tint: tower.type.projectileTint.skColor)
+        flashStatus("Deep Scan — all cloaked enemies revealed for 10s!")
+    }
+
+    private func executeOrbitalBombardment(_ tower: TowerNode) {
+        let canSee = tower.canSeeInvisible(globalReveal: gameTime < globalRevealEndTime)
+        let targets = enemies
+            .filter { $0.currentHealth > 0 && (!$0.isCamo || canSee) }
+            .sorted { $0.distanceTraveled > $1.distanceTraveled }
+            .prefix(3)
+
+        var totalReward = 0
+        for enemy in targets {
+            showOrbitalBeam(at: enemy.position, tint: tower.type.projectileTint.skColor)
+            totalReward += applySplashDamage(at: enemy.position, damage: 5,
+                                             radius: tower.type.splashRadius, bonusVsRobotic: false)
+        }
+        cleanUpDestroyedEnemies(rewarding: totalReward)
+        flashStatus("Orbital Bombardment inbound!")
+    }
+
+    private func executePhaseLance(_ tower: TowerNode) {
+        guard let target = enemies
+            .filter({ $0.currentHealth > 0 })
+            .max(by: { $0.distanceTraveled < $1.distanceTraveled }) else {
+            flashStatus("No targets for Phase Lance.")
+            return
+        }
+        let reward = performPierce(from: tower.position, through: target.position,
+                                   damage: 4, length: 1400,
+                                   tint: tower.type.projectileTint.skColor)
+        cleanUpDestroyedEnemies(rewarding: reward)
+        flashStatus("Phase Lance fired across the sector!")
+    }
+
+    private func executeHarmonicSurge(_ tower: TowerNode) {
+        globalRateBuffEndTime = gameTime + 6
+        for other in towers {
+            showExpandingRing(at: other.position, radius: other.type.bodyRadius * 2.2,
+                              tint: tower.type.projectileTint.skColor)
+        }
+        flashStatus("Harmonic Surge — all defenses firing 50% faster!")
+    }
+
+    private func executeSingularity(_ tower: TowerNode) {
         let flash = SKShapeNode(rectOf: GameConfig.canvasSize)
         flash.position = CGPoint(x: GameConfig.canvasWidth / 2, y: GameConfig.canvasHeight / 2)
-        flash.fillColor = SKColor(red: 1.0, green: 0.6, blue: 1.0, alpha: 1.0)
+        flash.fillColor = SKColor(red: 0.85, green: 0.45, blue: 1.0, alpha: 1.0)
         flash.strokeColor = .clear
         flash.alpha = 0.0
         flash.zPosition = 90
@@ -639,7 +1009,7 @@ final class GameScene: SKScene {
             totalReward += rewardForPops(enemy: enemy, popped: popped)
         }
         cleanUpDestroyedEnemies(rewarding: totalReward)
-        flashStatus("Plasma Storm unleashed!")
+        flashStatus("Singularity unleashed!")
     }
 
     // MARK: Placement
@@ -649,7 +1019,7 @@ final class GameScene: SKScene {
 
         let valid = isPlacementValid(at: location, bodyRadius: type.bodyRadius)
         guard valid else {
-            flashStatus("Can't deploy there — too close to the track or another defense.")
+            flashStatus("Can't deploy there — too close to the corridor or another defense.")
             DispatchQueue.main.async { viewModel.selectedTowerType = nil }
             return
         }
@@ -662,6 +1032,8 @@ final class GameScene: SKScene {
         let tower = TowerNode(type: type, position: location)
         towers.append(tower)
         addChild(tower)
+        tower.setScale(0.3)
+        tower.run(.scale(to: 1.0, duration: 0.2))
         flashStatus("\(type.displayName) deployed. Tap it to upgrade or fire \(type.abilitySignature).")
         DispatchQueue.main.async { viewModel.selectedTowerType = nil }
     }
@@ -716,10 +1088,69 @@ final class GameScene: SKScene {
         gameTime += deltaTime
 
         runSpawning(deltaTime: deltaTime)
+        runAuras()
         runTraversal(deltaTime: deltaTime)
         runCamoVisionExpiry()
         runTargeting()
         runProjectiles(speedScale: speedScale)
+    }
+
+    /// Computes per-frame field effects: gravity slows, scanner detection,
+    /// haste auras, and the global Deep Scan reveal.
+    private func runAuras() {
+        let globalReveal = gameTime < globalRevealEndTime
+
+        for enemy in enemies {
+            enemy.slowMultiplier = 1.0
+            if enemy.isCamo {
+                enemy.setRevealed(globalReveal)
+            }
+        }
+        for tower in towers {
+            tower.isScannerBuffed = false
+            tower.auraRateFactor = 1.0
+        }
+
+        for tower in towers {
+            switch tower.type.behavior {
+            case .slowField:
+                let slow = CGFloat(tower.currentSlowStrength(at: gameTime))
+                for enemy in enemies {
+                    let dx = enemy.position.x - tower.position.x
+                    let dy = enemy.position.y - tower.position.y
+                    if sqrt(dx * dx + dy * dy) <= tower.effectiveRange {
+                        // The distortion field is physical: it slows cloaked enemies too.
+                        enemy.slowMultiplier = min(enemy.slowMultiplier, 1.0 - slow)
+                    }
+                }
+
+            case .scannerSupport:
+                let haste = Double(tower.pathALevel) * 0.06
+                for other in towers where other !== tower {
+                    let dx = other.position.x - tower.position.x
+                    let dy = other.position.y - tower.position.y
+                    if sqrt(dx * dx + dy * dy) <= tower.effectiveRange {
+                        other.isScannerBuffed = true
+                        if haste > 0 {
+                            other.auraRateFactor = min(other.auraRateFactor, 1.0 - haste)
+                        }
+                    }
+                }
+
+            case .rateSupport:
+                let haste = tower.currentHasteStrength
+                for other in towers where other !== tower {
+                    let dx = other.position.x - tower.position.x
+                    let dy = other.position.y - tower.position.y
+                    if sqrt(dx * dx + dy * dy) <= tower.effectiveRange {
+                        other.auraRateFactor = min(other.auraRateFactor, 1.0 - haste)
+                    }
+                }
+
+            default:
+                break
+            }
+        }
     }
 
     /// Moves every active enemy toward its next waypoint using the vector formula.
@@ -755,15 +1186,23 @@ final class GameScene: SKScene {
         }
     }
 
-    /// Evaluates reload intervals and fires at the furthest-progressed valid enemy.
+    /// Evaluates reload intervals and dispatches each defense's attack behavior.
     private func runTargeting() {
-        for tower in towers {
-            guard gameTime - tower.lastFireTime >= tower.effectiveCooldown else { continue }
+        let globalReveal = gameTime < globalRevealEndTime
+        let globalRate = gameTime < globalRateBuffEndTime ? 0.5 : 1.0
 
+        for tower in towers {
+            let behavior = tower.type.behavior
+            guard behavior.isAttacking else { continue }
+
+            let cooldown = tower.effectiveCooldown * tower.auraRateFactor * globalRate
+            guard gameTime - tower.lastFireTime >= cooldown else { continue }
+
+            let canSee = tower.canSeeInvisible(globalReveal: globalReveal)
             let candidates = enemies.filter { enemy in
                 guard enemy.currentHealth > 0 else { return false }
-                // Strict cloak check: skip Phantoms unless the phase scanner is running.
-                if enemy.isCamo && !tower.isCamoDetectionActive { return false }
+                // Strict cloak check: skip Phantoms unless this tower can detect them.
+                if enemy.isCamo && !canSee { return false }
                 let dx = enemy.position.x - tower.position.x
                 let dy = enemy.position.y - tower.position.y
                 return sqrt(dx * dx + dy * dy) <= tower.effectiveRange
@@ -775,33 +1214,126 @@ final class GameScene: SKScene {
             tower.aim(at: target.position)
 
             let tint = tower.type.projectileTint.skColor
+            let damage = tower.currentDamage(at: gameTime)
 
-            if tower.type.firesRadially {
-                // EMP Blaster: 8 bolts in a radial spread.
-                for i in 0..<8 {
-                    let angle = CGFloat(i) * (.pi / 4)
-                    let dir = CGVector(dx: cos(angle), dy: sin(angle))
-                    let projectile = ProjectileNode(from: tower.position,
-                                                    target: nil,
-                                                    direction: dir,
-                                                    damage: tower.effectiveDamage,
-                                                    tint: tint)
-                    projectiles.append(projectile)
-                    addChild(projectile)
-                }
-            } else {
+            switch behavior {
+            case .singleTarget, .splashMissile:
                 let dx = target.position.x - tower.position.x
                 let dy = target.position.y - tower.position.y
                 let dist = max(sqrt(dx * dx + dy * dy), 0.001)
                 let projectile = ProjectileNode(from: tower.position,
                                                 target: target,
                                                 direction: CGVector(dx: dx / dist, dy: dy / dist),
-                                                damage: tower.effectiveDamage,
-                                                tint: tint)
+                                                damage: damage,
+                                                tint: tint,
+                                                splashRadius: tower.type.splashRadius)
                 projectiles.append(projectile)
                 addChild(projectile)
+
+            case .radialBurst:
+                for i in 0..<8 {
+                    let angle = CGFloat(i) * (.pi / 4)
+                    let projectile = ProjectileNode(from: tower.position,
+                                                    target: nil,
+                                                    direction: CGVector(dx: cos(angle), dy: sin(angle)),
+                                                    damage: damage,
+                                                    tint: tint,
+                                                    bonusVsRobotic: true)
+                    projectiles.append(projectile)
+                    addChild(projectile)
+                }
+
+            case .chainLightning:
+                let reward = performChain(from: tower, start: target, damage: damage, canSee: canSee)
+                cleanUpDestroyedEnemies(rewarding: reward)
+
+            case .piercingBeam:
+                let reward = performPierce(from: tower.position, through: target.position,
+                                           damage: damage, length: tower.effectiveRange,
+                                           tint: tint)
+                cleanUpDestroyedEnemies(rewarding: reward)
+
+            case .orbitalStrike:
+                showOrbitalBeam(at: target.position, tint: tint)
+                let reward = applySplashDamage(at: target.position, damage: damage,
+                                               radius: tower.type.splashRadius, bonusVsRobotic: false)
+                cleanUpDestroyedEnemies(rewarding: reward)
+
+            case .slowField, .scannerSupport, .rateSupport:
+                break
             }
         }
+    }
+
+    /// Instant chain-lightning arc jumping between nearby enemies with decaying damage.
+    private func performChain(from tower: TowerNode, start: EnemyNode, damage: Int, canSee: Bool) -> Int {
+        var visited = Set<UUID>()
+        var current: EnemyNode? = start
+        var previousPoint = tower.position
+        var reward = 0
+        var hop = 0
+
+        while let enemy = current, hop < tower.type.chainHops {
+            showLightning(from: previousPoint, to: enemy.position,
+                          tint: tower.type.projectileTint.skColor)
+            let hopDamage = max(1, damage - hop)
+            let popped = enemy.applyDamage(hopDamage)
+            reward += rewardForPops(enemy: enemy, popped: popped)
+            visited.insert(enemy.id)
+            previousPoint = enemy.position
+            hop += 1
+
+            current = enemies
+                .filter { candidate in
+                    guard !visited.contains(candidate.id), candidate.currentHealth > 0,
+                          (!candidate.isCamo || canSee) else { return false }
+                    return hypot(candidate.position.x - previousPoint.x,
+                                 candidate.position.y - previousPoint.y) <= tower.type.chainJumpDistance
+                }
+                .min { lhs, rhs in
+                    hypot(lhs.position.x - previousPoint.x, lhs.position.y - previousPoint.y)
+                        < hypot(rhs.position.x - previousPoint.x, rhs.position.y - previousPoint.y)
+                }
+        }
+        return reward
+    }
+
+    /// Instant piercing beam damaging every enemy along the line.
+    @discardableResult
+    private func performPierce(from origin: CGPoint, through targetPoint: CGPoint,
+                               damage: Int, length: CGFloat, tint: SKColor) -> Int {
+        let dx = targetPoint.x - origin.x
+        let dy = targetPoint.y - origin.y
+        let dist = max(sqrt(dx * dx + dy * dy), 0.001)
+        let end = CGPoint(x: origin.x + dx / dist * length,
+                          y: origin.y + dy / dist * length)
+        showBeam(from: origin, to: end, tint: tint, width: 5)
+
+        var reward = 0
+        for enemy in enemies where enemy.currentHealth > 0 {
+            if distanceToSegment(point: enemy.position, a: origin, b: end)
+                <= enemy.originalType.radius + 8 {
+                let popped = enemy.applyDamage(damage)
+                reward += rewardForPops(enemy: enemy, popped: popped)
+            }
+        }
+        return reward
+    }
+
+    /// Area damage application used by missiles, orbital strikes, and abilities.
+    private func applySplashDamage(at point: CGPoint, damage: Int,
+                                   radius: CGFloat, bonusVsRobotic: Bool) -> Int {
+        var reward = 0
+        for enemy in enemies where enemy.currentHealth > 0 {
+            let dx = enemy.position.x - point.x
+            let dy = enemy.position.y - point.y
+            if sqrt(dx * dx + dy * dy) <= radius + enemy.originalType.radius {
+                let dmg = (enemy.isRobotic && bonusVsRobotic) ? damage * 2 : damage
+                let popped = enemy.applyDamage(dmg)
+                reward += rewardForPops(enemy: enemy, popped: popped)
+            }
+        }
+        return reward
     }
 
     /// Advances projectiles, homing on live targets, and resolves collisions.
@@ -837,9 +1369,20 @@ final class GameScene: SKScene {
                 let dy = enemy.position.y - projectile.position.y
                 let hitRadius = enemy.originalType.radius + 5
                 if dx * dx + dy * dy <= hitRadius * hitRadius {
-                    let popped = enemy.applyDamage(projectile.damage)
-                    totalReward += rewardForPops(enemy: enemy, popped: popped)
-                    spawnPopBurst(at: enemy.position, tint: projectile.fillColor)
+                    if projectile.splashRadius > 0 {
+                        showExplosion(at: enemy.position, radius: projectile.splashRadius,
+                                      tint: projectile.fillColor)
+                        totalReward += applySplashDamage(at: enemy.position,
+                                                         damage: projectile.damage,
+                                                         radius: projectile.splashRadius,
+                                                         bonusVsRobotic: projectile.bonusVsRobotic)
+                    } else {
+                        let dmg = (enemy.isRobotic && projectile.bonusVsRobotic)
+                            ? projectile.damage * 2 : projectile.damage
+                        let popped = enemy.applyDamage(dmg)
+                        totalReward += rewardForPops(enemy: enemy, popped: popped)
+                        spawnPopBurst(at: enemy.position, tint: projectile.fillColor)
+                    }
                     hit = true
                     break
                 }
@@ -856,6 +1399,8 @@ final class GameScene: SKScene {
         cleanUpDestroyedEnemies(rewarding: totalReward)
     }
 
+    // MARK: Rewards & Cleanup
+
     /// Credits: small income per layer destroyed, plus the destruction bonus.
     private func rewardForPops(enemy: EnemyNode, popped: Int) -> Int {
         guard popped > 0 else { return 0 }
@@ -871,7 +1416,8 @@ final class GameScene: SKScene {
         guard !destroyed.isEmpty || reward > 0 else { return }
 
         for enemy in destroyed {
-            spawnPopBurst(at: enemy.position, tint: enemy.strokeColor)
+            spawnDeathBurst(at: enemy.position, tint: enemy.strokeColor,
+                            big: enemy.originalType == .behemoth)
             enemy.removeFromParent()
         }
         enemies.removeAll { $0.currentHealth <= 0 }
@@ -883,7 +1429,8 @@ final class GameScene: SKScene {
         }
     }
 
-    /// Programmatic particle burst on destruction (no asset files).
+    // MARK: Visual Effects
+
     private func spawnPopBurst(at point: CGPoint, tint: SKColor) {
         for i in 0..<6 {
             let shard = SKShapeNode(circleOfRadius: 2.5)
@@ -897,6 +1444,110 @@ final class GameScene: SKScene {
             let move = SKAction.moveBy(x: cos(angle) * 22, y: sin(angle) * 22, duration: 0.25)
             shard.run(.sequence([.group([move, .fadeOut(withDuration: 0.25)]), .removeFromParent()]))
         }
+    }
+
+    /// Destruction effect: shard burst plus an expanding shock ring.
+    private func spawnDeathBurst(at point: CGPoint, tint: SKColor, big: Bool) {
+        let shardCount = big ? 12 : 8
+        let throwDistance: CGFloat = big ? 44 : 26
+        for i in 0..<shardCount {
+            let shard = SKShapeNode(circleOfRadius: big ? 3.5 : 2.5)
+            shard.position = point
+            shard.fillColor = tint
+            shard.strokeColor = .clear
+            shard.glowWidth = 2
+            shard.zPosition = 30
+            addChild(shard)
+            let angle = CGFloat(i) * (2 * .pi / CGFloat(shardCount))
+            let move = SKAction.moveBy(x: cos(angle) * throwDistance,
+                                       y: sin(angle) * throwDistance, duration: 0.3)
+            shard.run(.sequence([.group([move, .fadeOut(withDuration: 0.3)]), .removeFromParent()]))
+        }
+        let ring = SKShapeNode(circleOfRadius: big ? 16 : 9)
+        ring.position = point
+        ring.fillColor = .clear
+        ring.strokeColor = tint
+        ring.lineWidth = 2
+        ring.glowWidth = 3
+        ring.zPosition = 30
+        addChild(ring)
+        ring.run(.sequence([
+            .group([.scale(to: big ? 3.0 : 2.2, duration: 0.3), .fadeOut(withDuration: 0.3)]),
+            .removeFromParent()
+        ]))
+    }
+
+    private func showExpandingRing(at point: CGPoint, radius: CGFloat, tint: SKColor) {
+        let ring = SKShapeNode(circleOfRadius: radius)
+        ring.position = point
+        ring.fillColor = tint.withAlphaComponent(0.18)
+        ring.strokeColor = tint
+        ring.lineWidth = 3
+        ring.glowWidth = 5
+        ring.zPosition = 40
+        ring.setScale(0.1)
+        addChild(ring)
+        ring.run(.sequence([
+            .group([.scale(to: 1.0, duration: 0.3), .fadeOut(withDuration: 0.55)]),
+            .removeFromParent()
+        ]))
+    }
+
+    private func showLightning(from a: CGPoint, to b: CGPoint, tint: SKColor) {
+        let path = CGMutablePath()
+        path.move(to: a)
+        let dx = b.x - a.x
+        let dy = b.y - a.y
+        // Jittered midpoints perpendicular to the arc for a lightning look.
+        let perpX = -dy * 0.18
+        let perpY = dx * 0.18
+        path.addLine(to: CGPoint(x: a.x + dx * 0.33 + perpX, y: a.y + dy * 0.33 + perpY))
+        path.addLine(to: CGPoint(x: a.x + dx * 0.66 - perpX, y: a.y + dy * 0.66 - perpY))
+        path.addLine(to: b)
+
+        let bolt = SKShapeNode(path: path)
+        bolt.strokeColor = tint
+        bolt.lineWidth = 2
+        bolt.glowWidth = 3
+        bolt.zPosition = 35
+        addChild(bolt)
+        bolt.run(.sequence([.fadeOut(withDuration: 0.18), .removeFromParent()]))
+    }
+
+    private func showBeam(from a: CGPoint, to b: CGPoint, tint: SKColor, width: CGFloat) {
+        let path = CGMutablePath()
+        path.move(to: a)
+        path.addLine(to: b)
+        let beam = SKShapeNode(path: path)
+        beam.strokeColor = tint
+        beam.lineWidth = width
+        beam.lineCap = .round
+        beam.glowWidth = 5
+        beam.zPosition = 35
+        addChild(beam)
+        beam.run(.sequence([.fadeOut(withDuration: 0.22), .removeFromParent()]))
+    }
+
+    private func showOrbitalBeam(at point: CGPoint, tint: SKColor) {
+        showBeam(from: CGPoint(x: point.x, y: GameConfig.canvasHeight + 20),
+                 to: point, tint: tint, width: 6)
+        showExplosion(at: point, radius: 40, tint: tint)
+    }
+
+    private func showExplosion(at point: CGPoint, radius: CGFloat, tint: SKColor) {
+        let blast = SKShapeNode(circleOfRadius: radius)
+        blast.position = point
+        blast.fillColor = tint.withAlphaComponent(0.35)
+        blast.strokeColor = tint
+        blast.lineWidth = 2
+        blast.glowWidth = 4
+        blast.zPosition = 35
+        blast.setScale(0.2)
+        addChild(blast)
+        blast.run(.sequence([
+            .group([.scale(to: 1.0, duration: 0.18), .fadeOut(withDuration: 0.35)]),
+            .removeFromParent()
+        ]))
     }
 
     private func flashStatus(_ message: String) {
@@ -920,13 +1571,15 @@ final class GameScene: SKScene {
         timeSinceWaveEnded = 0
         timeSinceLastSpawn = 0
         gameTime = 0
+        globalRevealEndTime = 0
+        globalRateBuffEndTime = 0
         queueWave(1)
     }
 }
 
 // MARK: - Deterministic RNG for scenery
 
-/// Simple seeded generator so the programmatic scenery is stable between launches.
+/// Simple seeded generator so the programmatic backdrop is stable between launches.
 struct SeededGenerator: RandomNumberGenerator {
     private var state: UInt64
     init(seed: UInt64) { state = seed &* 0x9E3779B97F4A7C15 | 1 }

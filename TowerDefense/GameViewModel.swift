@@ -34,7 +34,11 @@ final class GameViewModel: ObservableObject {
     @Published var currentWave: Int = 1
     @Published var isSimulationActive: Bool = true
     @Published var isGameOver: Bool = false
+    @Published var isVictory: Bool = false
     @Published var selectedTowerType: TowerType? = nil
+
+    /// Waves required to secure the current sector (set at mission start).
+    @Published var totalWaves: Int = 10
 
     /// Simulation tick multiplier: 1.0 normal, 2.0 fast-forward.
     @Published var gameSpeed: Double = 1.0
@@ -87,7 +91,19 @@ final class GameViewModel: ObservableObject {
 
     func advanceWave() {
         currentWave += 1
-        statusMessage = "Wave \(currentWave) incoming!"
+        statusMessage = "Wave \(currentWave) of \(totalWaves) incoming!"
+    }
+
+    // MARK: - Mission Victory
+
+    /// Called by the scene once the final wave is cleared.
+    func winMission() {
+        guard !isVictory && !isGameOver else { return }
+        isVictory = true
+        isSimulationActive = false
+        selectedTowerType = nil
+        selectedTowerInfo = nil
+        statusMessage = "Sector secured — invasion repelled!"
     }
 
     // MARK: - Game Speed
@@ -126,6 +142,7 @@ final class GameViewModel: ObservableObject {
         currentWave = 1
         isSimulationActive = true
         isGameOver = false
+        isVictory = false
         selectedTowerType = nil
         selectedTowerInfo = nil
         gameSpeed = 1.0
