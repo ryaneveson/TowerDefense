@@ -1,12 +1,3 @@
-# TowerDefense
-Here is a highly precise, system-level Markdown prompt tailored specifically for **Cursor** (or any LLM-powered IDE). It translates the architecture into explicit execution instructions, rules, and behaviors so that the editor can generate the entire fully functioning codebase from scratch without leaving gaps.
-
-Copy and paste everything below directly into Cursor’s Composer (`Cmd + I` or `Ctrl + I`) or Chat panel.
-
----
-
-# System Specification Prompt: Bloons-Style Tower Defense MVP
-
 ## Project Overview
 
 You are building a fully functioning, standalone 2D Tower Defense MVP for iOS/iPadOS built entirely with **SwiftUI** (UI, state tracking, HUD overlays) and **SpriteKit** (game loop, high-performance rendering, movement vectors, and custom collision targeting calculations).
