@@ -16,7 +16,7 @@ struct ContentView: View {
             ZStack {
                 Color.black.ignoresSafeArea()
 
-                SpriteView(scene: configuredScene())
+                SpriteView(scene: scene)
                     .aspectRatio(GameConfig.canvasWidth / GameConfig.canvasHeight, contentMode: .fit)
                     .frame(maxWidth: geometry.size.width, maxHeight: geometry.size.height)
 
@@ -34,13 +34,9 @@ struct ContentView: View {
         }
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
-    }
-
-    private func configuredScene() -> GameScene {
-        if scene.viewModel == nil {
+        .onAppear {
             scene.viewModel = viewModel
         }
-        return scene
     }
 
     // MARK: - Top Inventory Dashboard Bar
