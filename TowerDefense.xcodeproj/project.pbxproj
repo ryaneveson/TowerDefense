@@ -7,13 +7,7 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		AA0000052E000005000000AA /* TowerDefense.app */ = {
-			isa = PBXFileReference;
-			explicitFileType = wrapper.application;
-			includeInIndex = 0;
-			path = TowerDefense.app;
-			sourceTree = BUILT_PRODUCTS_DIR;
-		};
+		AA0000052E000005000000AA /* TowerDefense.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TowerDefense.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -23,6 +17,16 @@
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		AA0000092E000009000000AA /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		AA0000022E000002000000AA = {
@@ -119,16 +123,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
-
-/* Begin PBXFrameworksBuildPhase section */
-		AA0000092E000009000000AA /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXFrameworksBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
 		AA00000D2E00000D000000AA /* Debug */ = {
@@ -249,20 +243,20 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		AA00000C2E00000C000000AA /* Build configuration list for PBXProject "TowerDefense" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				AA00000D2E00000D000000AA /* Debug */,
-				AA00000E2E00000E000000AA /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
 		AA0000072E000007000000AA /* Build configuration list for PBXNativeTarget "TowerDefense" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				AA00000F2E00000F000000AA /* Debug */,
 				AA0000102E000010000000AA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AA00000C2E00000C000000AA /* Build configuration list for PBXProject "TowerDefense" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA00000D2E00000D000000AA /* Debug */,
+				AA00000E2E00000E000000AA /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

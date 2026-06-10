@@ -1,13 +1,34 @@
 import Foundation
 import Combine
 
+// MARK: - App Phase
+
+enum GamePhase {
+    case home
+    case playing
+}
+
+// MARK: - Sidebar Snapshot
+
+/// Immutable snapshot of a placed defense, published to drive the upgrade sidebar.
+struct TowerPanelInfo: Equatable {
+    let id: String
+    let type: TowerType
+    var pathALevel: Int
+    var pathBLevel: Int
+    var damage: Int
+    var range: Int
+    var fireRate: Double
+}
+
 /// Unified ObservableObject acting as the data bridge between the SpriteKit
 /// simulation and the SwiftUI HUD. Handles balance transactions, lives,
-/// wave tracking, and per-tower ability cooldown timestamps.
+/// wave tracking, game speed, and per-tower ability cooldown timestamps.
 final class GameViewModel: ObservableObject {
 
     // MARK: - Published Metrics
 
+    @Published var phase: GamePhase = .home
     @Published var gold: Int = GameConfig.startingGold
     @Published var lives: Int = GameConfig.startingLives
     @Published var currentWave: Int = 1
@@ -15,8 +36,14 @@ final class GameViewModel: ObservableObject {
     @Published var isGameOver: Bool = false
     @Published var selectedTowerType: TowerType? = nil
 
+    /// Simulation tick multiplier: 1.0 normal, 2.0 fast-forward.
+    @Published var gameSpeed: Double = 1.0
+
+    /// Snapshot of the currently selected placed defense (drives the sidebar).
+    @Published var selectedTowerInfo: TowerPanelInfo? = nil
+
     /// Transient HUD message (e.g. ability fired, insufficient funds).
-    @Published var statusMessage: String = "Select a tower to begin defending!"
+    @Published var statusMessage: String = "Select a defense to begin!"
 
     // MARK: - Ability Cooldown Index
 
@@ -51,7 +78,8 @@ final class GameViewModel: ObservableObject {
         if lives <= 0 {
             isGameOver = true
             isSimulationActive = false
-            statusMessage = "Game Over — the balloons broke through!"
+            selectedTowerInfo = nil
+            statusMessage = "Core breached — the swarm broke through!"
         }
     }
 
@@ -60,6 +88,12 @@ final class GameViewModel: ObservableObject {
     func advanceWave() {
         currentWave += 1
         statusMessage = "Wave \(currentWave) incoming!"
+    }
+
+    // MARK: - Game Speed
+
+    func toggleGameSpeed() {
+        gameSpeed = gameSpeed >= 2.0 ? 1.0 : 2.0
     }
 
     // MARK: - Ability Cooldown Verification
@@ -84,7 +118,8 @@ final class GameViewModel: ObservableObject {
 
     // MARK: - Reset
 
-    /// Wipes all state back to default configuration values.
+    /// Wipes all gameplay state back to default configuration values.
+    /// Does not change the app phase — callers decide where to navigate.
     func reset() {
         gold = GameConfig.startingGold
         lives = GameConfig.startingLives
@@ -92,7 +127,9 @@ final class GameViewModel: ObservableObject {
         isSimulationActive = true
         isGameOver = false
         selectedTowerType = nil
+        selectedTowerInfo = nil
+        gameSpeed = 1.0
         abilityTimestamps.removeAll()
-        statusMessage = "New game started. Place your first tower!"
+        statusMessage = "Deploy your first defense!"
     }
 }
