@@ -79,6 +79,10 @@ private struct GameContainerView: View {
     let onHome: () -> Void
     let onNextMission: (MapConfig) -> Void
 
+    /// Guide-robot presentation state (the bubble auto-hides; tap the bot to recall it).
+    @State private var guideExpanded: Bool = true
+    @State private var guideHideWorkItem: DispatchWorkItem?
+
     var body: some View {
         GeometryReader { geometry in
             let metrics = LayoutMetrics(size: geometry.size)
@@ -97,6 +101,7 @@ private struct GameContainerView: View {
                 VStack(spacing: 0) {
                     topDashboard(metrics)
                     Spacer(minLength: 0)
+                    guideRobot(metrics)
                     statusBanner(metrics)
                     purchaseDock(metrics)
                 }
@@ -125,7 +130,86 @@ private struct GameContainerView: View {
                 }
             }
             .animation(.spring(response: 0.35, dampingFraction: 0.85), value: viewModel.selectedTowerInfo)
+            .onAppear { scheduleGuideHide() }
+            .onChange(of: viewModel.guideMessageID) { _, _ in
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                    guideExpanded = true
+                }
+                scheduleGuideHide()
+            }
         }
+    }
+
+    // MARK: Guide Robot (ARC-7)
+
+    @ViewBuilder
+    private func guideRobot(_ metrics: LayoutMetrics) -> some View {
+        HStack(alignment: .bottom, spacing: 10) {
+            Button {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                    guideExpanded.toggle()
+                }
+                if guideExpanded { scheduleGuideHide() }
+            } label: {
+                GuideRobotAvatar(size: metrics.isCompact ? 38 : 46,
+                                 alert: guideExpanded)
+            }
+            .buttonStyle(.plain)
+
+            if guideExpanded {
+                guideBubble(metrics)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.bottom, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func guideBubble(_ metrics: LayoutMetrics) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 5) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 9, weight: .bold))
+                Text("ARC-7 · GUIDE")
+                    .font(.system(size: 9, weight: .heavy))
+                    .tracking(1.5)
+            }
+            .foregroundStyle(.cyan)
+
+            Text(viewModel.guideMessage)
+                .font(.system(size: metrics.isCompact ? 11 : 12.5, weight: .medium))
+                .foregroundStyle(.white.opacity(0.95))
+                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(4)
+                .minimumScaleFactor(0.8)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .frame(maxWidth: metrics.isCompact ? 250 : 380, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(LinearGradient(colors: [Color(red: 0.04, green: 0.10, blue: 0.16),
+                                              Color(red: 0.02, green: 0.06, blue: 0.12)],
+                                     startPoint: .top, endPoint: .bottom))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(.cyan.opacity(0.45), lineWidth: 1)
+        )
+        .shadow(color: .cyan.opacity(0.25), radius: 8)
+    }
+
+    /// Auto-hides the guide bubble after a readable delay; tapping the bot recalls it.
+    private func scheduleGuideHide() {
+        guideHideWorkItem?.cancel()
+        let work = DispatchWorkItem {
+            withAnimation(.easeInOut(duration: 0.3)) { guideExpanded = false }
+        }
+        guideHideWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 11, execute: work)
     }
 
     // MARK: Top Dashboard
@@ -499,5 +583,67 @@ private struct GameContainerView: View {
             .padding(20)
         }
         .transition(.scale.combined(with: .opacity))
+    }
+}
+
+// MARK: - Guide Robot Avatar
+
+/// A small friendly companion bot drawn from primitives. It gently bobs, blinks,
+/// and flares its antenna when it has something new to say.
+private struct GuideRobotAvatar: View {
+    let size: CGFloat
+    let alert: Bool
+
+    @State private var bob = false
+
+    var body: some View {
+        ZStack {
+            // Glow halo.
+            Circle()
+                .fill(Color.cyan.opacity(alert ? 0.28 : 0.14))
+                .frame(width: size * 1.5, height: size * 1.5)
+                .blur(radius: 6)
+
+            VStack(spacing: 0) {
+                // Antenna.
+                Capsule()
+                    .fill(Color.cyan.opacity(0.7))
+                    .frame(width: 2, height: size * 0.22)
+                Circle()
+                    .fill(Color.cyan)
+                    .frame(width: size * 0.14, height: size * 0.14)
+                    .shadow(color: .cyan, radius: alert ? 5 : 2)
+                    .offset(y: -size * 0.22)
+            }
+            .offset(y: -size * 0.52)
+
+            // Head.
+            RoundedRectangle(cornerRadius: size * 0.28)
+                .fill(LinearGradient(colors: [Color(red: 0.10, green: 0.20, blue: 0.30),
+                                              Color(red: 0.04, green: 0.10, blue: 0.18)],
+                                     startPoint: .top, endPoint: .bottom))
+                .frame(width: size, height: size * 0.86)
+                .overlay(
+                    RoundedRectangle(cornerRadius: size * 0.28)
+                        .stroke(Color.cyan.opacity(0.7), lineWidth: 1.5)
+                )
+
+            // Eyes.
+            HStack(spacing: size * 0.2) {
+                ForEach(0..<2, id: \.self) { _ in
+                    Capsule()
+                        .fill(Color.cyan)
+                        .frame(width: size * 0.16, height: size * 0.18)
+                        .shadow(color: .cyan, radius: 3)
+                }
+            }
+        }
+        .frame(width: size * 1.5, height: size * 1.5)
+        .offset(y: bob ? -2 : 2)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+                bob = true
+            }
+        }
     }
 }

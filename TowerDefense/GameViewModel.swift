@@ -49,6 +49,27 @@ final class GameViewModel: ObservableObject {
     /// Transient HUD message (e.g. ability fired, insufficient funds).
     @Published var statusMessage: String = "Select a defense to begin!"
 
+    // MARK: - Guide Robot
+
+    /// Latest briefing shown by the on-screen guide robot ("ARC-7").
+    @Published var guideMessage: String =
+        "Hi Commander, I'm ARC-7! Tap a defense at the bottom, then tap an open spot on the map to deploy it. I'll pop in whenever a new threat appears."
+    /// Bumps whenever a new guide message arrives so the UI can re-animate.
+    @Published var guideMessageID: Int = 0
+
+    /// Guide keys already shown this mission, so one-time tips don't repeat.
+    private var shownGuideKeys: Set<String> = []
+
+    /// Shows a guide briefing. One-time keys are suppressed after first use.
+    func showGuide(key: String, message: String, repeatable: Bool = false) {
+        if !repeatable {
+            guard !shownGuideKeys.contains(key) else { return }
+            shownGuideKeys.insert(key)
+        }
+        guideMessage = message
+        guideMessageID += 1
+    }
+
     // MARK: - Ability Cooldown Index
 
     /// Maps tower ID signatures to the Date its ability was last executed.
@@ -84,6 +105,9 @@ final class GameViewModel: ObservableObject {
             isSimulationActive = false
             selectedTowerInfo = nil
             statusMessage = "Core breached — the swarm broke through!"
+        } else if lives <= 8 {
+            showGuide(key: "lowLives",
+                      message: "Core integrity is critical! Every enemy that leaks past the end of the track costs you a life. Upgrade your strongest towers and seal the gaps before the next wave overwhelms you.")
         }
     }
 
@@ -148,5 +172,8 @@ final class GameViewModel: ObservableObject {
         gameSpeed = 1.0
         abilityTimestamps.removeAll()
         statusMessage = "Deploy your first defense!"
+        shownGuideKeys.removeAll()
+        guideMessage = "Hi Commander, I'm ARC-7! Tap a defense at the bottom, then tap an open spot on the map to deploy it. I'll pop in whenever a new threat appears."
+        guideMessageID += 1
     }
 }

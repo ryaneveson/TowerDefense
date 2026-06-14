@@ -41,12 +41,18 @@ final class EnemyNode: SKShapeNode {
         EnemyType.tier(forRemainingHealth: currentHealth, original: originalType).speed
     }
 
-    init(type: EnemyType, waypoints: [CGPoint]) {
+    /// - Parameters:
+    ///   - bonusHealth: extra structural layers granted by wave scaling.
+    ///   - startIndex: waypoint to head toward first (escorts inherit the carrier's progress).
+    ///   - startPosition: spawn point on the track (defaults to the corridor entrance).
+    init(type: EnemyType, waypoints: [CGPoint],
+         bonusHealth: Int = 0, startIndex: Int? = nil, startPosition: CGPoint? = nil) {
         self.originalType = type
         self.waypoints = waypoints
-        self.currentHealth = type.healthLayers
+        self.currentHealth = max(1, type.healthLayers + bonusHealth)
         super.init()
-        position = waypoints[0]
+        waypointIndex = min(max(1, startIndex ?? 1), waypoints.count - 1)
+        position = startPosition ?? waypoints[0]
         zPosition = 5
         name = "enemy"
         redrawBody()
@@ -171,6 +177,64 @@ final class EnemyNode: SKShapeNode {
             core.strokeColor = .clear
             core.glowWidth = 5
             addChild(core)
+
+        case .cruiser:
+            // Sleek armored dart with swept wings and twin engine glows.
+            let hull = CGMutablePath()
+            hull.move(to: CGPoint(x: 0, y: r * 1.25))
+            hull.addLine(to: CGPoint(x: r * 0.45, y: -r * 0.1))
+            hull.addLine(to: CGPoint(x: r * 1.15, y: -r * 0.95))
+            hull.addLine(to: CGPoint(x: r * 0.3, y: -r * 0.6))
+            hull.addLine(to: CGPoint(x: -r * 0.3, y: -r * 0.6))
+            hull.addLine(to: CGPoint(x: -r * 1.15, y: -r * 0.95))
+            hull.addLine(to: CGPoint(x: -r * 0.45, y: -r * 0.1))
+            hull.closeSubpath()
+            path = hull
+            lineWidth = 2.5
+            let canopy = SKShapeNode(ellipseOf: CGSize(width: r * 0.5, height: r * 0.85))
+            canopy.fillColor = SKColor(red: 0.55, green: 0.95, blue: 1.0, alpha: 0.85)
+            canopy.strokeColor = .clear
+            canopy.glowWidth = 2
+            canopy.position = CGPoint(x: 0, y: r * 0.35)
+            addChild(canopy)
+            for side in [CGFloat(-1), CGFloat(1)] {
+                let engine = SKShapeNode(ellipseOf: CGSize(width: r * 0.34, height: r * 0.5))
+                engine.fillColor = SKColor(red: 1.0, green: 0.6, blue: 0.2, alpha: 0.95)
+                engine.strokeColor = .clear
+                engine.glowWidth = 4
+                engine.position = CGPoint(x: side * r * 0.4, y: -r * 0.75)
+                addChild(engine)
+            }
+
+        case .carrier:
+            // Heavy hexagonal hull with a deploy bay seam and a bank of engines.
+            let hullRect = CGRect(x: -r, y: -r * 0.7, width: r * 2, height: r * 1.4)
+            path = CGPath(roundedRect: hullRect, cornerWidth: 7, cornerHeight: 7, transform: nil)
+            lineWidth = 3.5
+            let plating = SKShapeNode(rectOf: CGSize(width: r * 1.5, height: r * 0.9), cornerRadius: 4)
+            plating.fillColor = .clear
+            plating.strokeColor = SKColor(white: 0.15, alpha: 0.9)
+            plating.lineWidth = 2
+            addChild(plating)
+            // Glowing deploy-bay doors down the centerline.
+            let bay = SKShapeNode(rectOf: CGSize(width: r * 1.2, height: r * 0.28), cornerRadius: 3)
+            bay.fillColor = SKColor(red: 1.0, green: 0.55, blue: 0.2, alpha: 0.75)
+            bay.strokeColor = SKColor(red: 1.0, green: 0.75, blue: 0.35, alpha: 1.0)
+            bay.lineWidth = 1.5
+            bay.glowWidth = 4
+            addChild(bay)
+            bay.run(.repeatForever(.sequence([
+                .fadeAlpha(to: 0.45, duration: 0.6),
+                .fadeAlpha(to: 1.0, duration: 0.6)
+            ])))
+            for offset in [CGFloat(-0.6), 0, 0.6] {
+                let engine = SKShapeNode(circleOfRadius: r * 0.18)
+                engine.fillColor = SKColor(red: 0.55, green: 0.85, blue: 1.0, alpha: 0.95)
+                engine.strokeColor = .clear
+                engine.glowWidth = 4
+                engine.position = CGPoint(x: offset * r, y: -r * 0.75)
+                addChild(engine)
+            }
         }
     }
 
@@ -605,6 +669,11 @@ final class GameScene: SKScene {
     private var timeSinceWaveEnded: TimeInterval = 0
     private var waveInFlight = false
 
+    /// Extra structural layers granted to every enemy in the active wave.
+    private var waveBonusHealth: Int = 0
+    /// Spawn cadence for the active wave (tightens on later waves).
+    private var currentSpawnInterval: TimeInterval = GameConfig.spawnInterval
+
     private var enemies: [EnemyNode] = []
     private var towers: [TowerNode] = []
     private var projectiles: [ProjectileNode] = []
@@ -694,30 +763,77 @@ final class GameScene: SKScene {
     // MARK: Wave Spawning & Difficulty
 
     /// Wave composition scales with the sector difficulty and wave number:
-    /// early sectors are pods and blobs; drones arrive at difficulty 2;
-    /// cloaked wisps from difficulty 2-3; behemoths anchor the late campaign.
+    /// early sectors are pods and blobs; drones arrive at difficulty 2; cloaked
+    /// wisps from difficulty 2-3; Raider Ships and Dropships harden the mid-game;
+    /// behemoths anchor the late campaign. Enemy health and spawn cadence both
+    /// ramp with the wave number so no sector stays a walkover.
     private func queueWave(_ wave: Int) {
         let d = map.difficulty
-        let count = GameConfig.baseEnemiesPerWave + wave * GameConfig.extraEnemiesPerWave + d * 2
+
+        // More bodies, and they keep coming faster as the wave count climbs.
+        let count = GameConfig.baseEnemiesPerWave
+            + wave * GameConfig.extraEnemiesPerWave
+            + d * 3
+
+        // Hardened swarm: every enemy gains layers in later waves / tougher sectors.
+        waveBonusHealth = max(0, (wave - 1) / 3) + max(0, d - 2)
+
+        // Tighten the spawn cadence on later waves so the line gets stress-tested.
+        currentSpawnInterval = max(0.34, GameConfig.spawnInterval - Double(wave) * 0.02 - Double(d) * 0.03)
+
         var queue: [EnemyType] = []
         for i in 0..<count {
-            if d >= 5 && i % 7 == 6 {
-                queue.append(.behemoth)
+            let enemy: EnemyType
+            if d >= 4 && wave >= 5 && i % 11 == 10 {
+                // Dropships arrive in the late campaign and crack open on death.
+                enemy = .carrier
+            } else if d >= 5 && i % 7 == 6 {
+                enemy = .behemoth
             } else if d >= 4 && wave >= 4 && i % 9 == 8 {
-                queue.append(.behemoth)
-            } else if (d >= 3 && wave >= 3 && i % 5 == 4) || (d == 2 && wave >= 6 && i % 6 == 5) {
-                queue.append(.wisp)
+                enemy = .behemoth
+            } else if d >= 2 && wave >= 3 && i % 8 == 7 {
+                // Armored Raider Ships escort the swarm from the mid campaign on.
+                enemy = .cruiser
+            } else if (d >= 3 && wave >= 3 && i % 5 == 4) || (d == 2 && wave >= 5 && i % 6 == 5) {
+                enemy = .wisp
             } else if d >= 2 && wave >= 2 && i % 4 == 3 {
-                queue.append(.drone)
+                enemy = .drone
             } else if wave >= 2 && i % 2 == 1 {
-                queue.append(.blob)
+                enemy = .blob
             } else {
-                queue.append(.pod)
+                enemy = .pod
             }
+            queue.append(enemy)
         }
+
+        // Every few waves on the harder sectors, anchor the column with a Dropship
+        // even if the modulo pattern missed one — keeps the warship threat present.
+        if d >= 3 && wave >= 6 && wave % 3 == 0 && !queue.contains(.carrier) {
+            queue.append(.carrier)
+        }
+
         spawnQueue = queue
         waveInFlight = true
-        timeSinceLastSpawn = GameConfig.spawnInterval // spawn first enemy immediately
+        timeSinceLastSpawn = currentSpawnInterval // spawn first enemy immediately
+
+        announceWaveThreats(queue)
+    }
+
+    /// Surfaces a one-time guide-robot briefing the first time the player will
+    /// face cloaked wisps or the warship classes, since those need new tactics.
+    private func announceWaveThreats(_ queue: [EnemyType]) {
+        if queue.contains(.carrier) {
+            flashGuide("threat.carrier",
+                       "Dropship inbound! That armored hauler is packed with troops — when it's destroyed it bursts open into a fresh escort wing. Hit it early with EMP and splash damage.")
+        }
+        if queue.contains(.cruiser) {
+            flashGuide("threat.cruiser",
+                       "Raider Ships detected! These warships are fast and heavily armored. They're mechanical, so EMP Towers deal double damage. Stack damage and slow fields on the corridor.")
+        }
+        if queue.contains(.wisp) {
+            flashGuide("threat.wisp",
+                       "Cloaked Phantom Wisps incoming — they're invisible to most defenses! Build a Scanner Array or a Quantum Beam, or fire a Laser's Phase Scanner, so your towers can actually see and shoot them.")
+        }
     }
 
     private func runSpawning(deltaTime: TimeInterval) {
@@ -735,9 +851,13 @@ final class GameScene: SKScene {
                 return
             }
             timeSinceLastSpawn += deltaTime
-            if timeSinceLastSpawn >= GameConfig.spawnInterval {
+            if timeSinceLastSpawn >= currentSpawnInterval {
                 timeSinceLastSpawn = 0
-                let enemy = EnemyNode(type: spawnQueue.removeFirst(), waypoints: map.waypoints)
+                let type = spawnQueue.removeFirst()
+                // Warships shrug off chip damage on their own; scaling only the
+                // rank-and-file keeps the bonus-health ramp from feeling unfair.
+                let bonus = type.escortPayload.isEmpty ? waveBonusHealth : waveBonusHealth / 2
+                let enemy = EnemyNode(type: type, waypoints: map.waypoints, bonusHealth: bonus)
                 enemies.append(enemy)
                 addChild(enemy)
                 // Warp-in effect.
@@ -1035,6 +1155,8 @@ final class GameScene: SKScene {
         tower.setScale(0.3)
         tower.run(.scale(to: 1.0, duration: 0.2))
         flashStatus("\(type.displayName) deployed. Tap it to upgrade or fire \(type.abilitySignature).")
+        flashGuide("firstTower",
+                   "Defense online! Tap any tower you've built to open its upgrade panel — there you can boost it along two paths or trigger its special ability. Keep the corridor covered and place towers near tight corners.")
         DispatchQueue.main.async { viewModel.selectedTowerType = nil }
     }
 
@@ -1415,18 +1537,46 @@ final class GameScene: SKScene {
         let destroyed = enemies.filter { $0.currentHealth <= 0 }
         guard !destroyed.isEmpty || reward > 0 else { return }
 
+        // Capture warship death points so we can deploy their escort wings.
+        let escortSpawns: [(payload: [EnemyType], index: Int, position: CGPoint)] = destroyed
+            .filter { !$0.originalType.escortPayload.isEmpty }
+            .map { ($0.originalType.escortPayload, $0.waypointIndex, $0.position) }
+
         for enemy in destroyed {
-            spawnDeathBurst(at: enemy.position, tint: enemy.strokeColor,
-                            big: enemy.originalType == .behemoth)
+            let big = enemy.originalType == .behemoth || enemy.originalType == .carrier
+            spawnDeathBurst(at: enemy.position, tint: enemy.strokeColor, big: big)
             enemy.removeFromParent()
         }
         enemies.removeAll { $0.currentHealth <= 0 }
+
+        for spawn in escortSpawns {
+            releaseEscorts(spawn.payload, index: spawn.index, at: spawn.position)
+        }
 
         if reward > 0 {
             DispatchQueue.main.async { [weak viewModel] in
                 viewModel?.earnGold(reward)
             }
         }
+    }
+
+    /// Spawns a destroyed Dropship's escorts mid-corridor, inheriting its track
+    /// progress so the fresh wing keeps pushing toward the core.
+    private func releaseEscorts(_ payload: [EnemyType], index: Int, at point: CGPoint) {
+        guard !payload.isEmpty else { return }
+        for (offset, type) in payload.enumerated() {
+            // Fan the escorts out slightly so they don't stack on one pixel.
+            let spread = CGFloat(offset) - CGFloat(payload.count - 1) / 2
+            let jitter = CGPoint(x: point.x + spread * 10, y: point.y + spread * 8)
+            let escort = EnemyNode(type: type, waypoints: map.waypoints,
+                                   startIndex: index, startPosition: jitter)
+            enemies.append(escort)
+            addChild(escort)
+            escort.setScale(0.2)
+            escort.run(.scale(to: 1.0, duration: 0.2))
+        }
+        showExpandingRing(at: point, radius: 46,
+                          tint: SKColor(red: 1.0, green: 0.6, blue: 0.25, alpha: 0.9))
     }
 
     // MARK: Visual Effects
@@ -1556,6 +1706,14 @@ final class GameScene: SKScene {
         }
     }
 
+    /// Routes a contextual briefing to the guide robot. Each `key` only fires
+    /// once per mission so repeated waves don't nag the player.
+    private func flashGuide(_ key: String, _ message: String) {
+        DispatchQueue.main.async { [weak viewModel] in
+            viewModel?.showGuide(key: key, message: message)
+        }
+    }
+
     // MARK: Full Reset
 
     func resetSimulation() {
@@ -1570,6 +1728,8 @@ final class GameScene: SKScene {
         waveInFlight = false
         timeSinceWaveEnded = 0
         timeSinceLastSpawn = 0
+        waveBonusHealth = 0
+        currentSpawnInterval = GameConfig.spawnInterval
         gameTime = 0
         globalRevealEndTime = 0
         globalRateBuffEndTime = 0

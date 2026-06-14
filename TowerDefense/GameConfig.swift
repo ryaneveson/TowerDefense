@@ -11,14 +11,16 @@ enum GameConfig {
     static let canvasHeight: CGFloat = 768
     static let canvasSize = CGSize(width: canvasWidth, height: canvasHeight)
 
-    /// Starting player resources.
-    static let startingGold: Int = 350
-    static let startingLives: Int = 40
+    /// Starting player resources. Core integrity is deliberately tight — a
+    /// handful of leaks is recoverable, but the swarm will punish a weak line.
+    static let startingGold: Int = 320
+    static let startingLives: Int = 22
 
-    /// Wave pacing.
-    static let secondsBetweenWaves: TimeInterval = 8.0
-    static let baseEnemiesPerWave: Int = 6
-    static let extraEnemiesPerWave: Int = 2
+    /// Wave pacing. Spawn cadence tightens automatically on later waves
+    /// (see GameScene.queueWave) so the pressure ramps as the campaign goes on.
+    static let secondsBetweenWaves: TimeInterval = 7.0
+    static let baseEnemiesPerWave: Int = 7
+    static let extraEnemiesPerWave: Int = 3
     static let spawnInterval: TimeInterval = 0.8
 
     /// Visual track width drawn under the waypoint path.
@@ -245,13 +247,16 @@ struct MapConfig: Identifiable, Equatable {
 
 // MARK: - Enemy Types (Alien Swarm)
 
-/// The invaders: alien pods, cosmic blobs, rogue drones, cloaked wisps, and void behemoths.
+/// The invaders: alien pods, cosmic blobs, rogue drones, cloaked wisps, void
+/// behemoths, and the late-campaign warship class (Raider Ships and Dropships).
 enum EnemyType: String, CaseIterable, Identifiable {
     case pod       // Scout Pod — 1 layer, slow
     case blob      // Cosmic Blob — 2 layers, fast (degrades into a pod)
     case drone     // Rogue Drone — robotic, 2 layers, fastest; EMP deals double damage
     case wisp      // Phantom Wisp — invisible energy entity, 3 layers
     case behemoth  // Void Behemoth — 6 layers, slow, late-game armor
+    case cruiser   // Raider Ship — armored robotic warship, fast and tanky
+    case carrier   // Dropship — heavy robotic ship that deploys escorts when destroyed
 
     var id: String { rawValue }
 
@@ -262,6 +267,8 @@ enum EnemyType: String, CaseIterable, Identifiable {
         case .drone:    return "Rogue Drone"
         case .wisp:     return "Phantom Wisp"
         case .behemoth: return "Void Behemoth"
+        case .cruiser:  return "Raider Ship"
+        case .carrier:  return "Dropship"
         }
     }
 
@@ -273,6 +280,8 @@ enum EnemyType: String, CaseIterable, Identifiable {
         case .drone:    return 2.6
         case .wisp:     return 1.9
         case .behemoth: return 1.1
+        case .cruiser:  return 2.4
+        case .carrier:  return 1.0
         }
     }
 
@@ -284,6 +293,8 @@ enum EnemyType: String, CaseIterable, Identifiable {
         case .drone:    return 2
         case .wisp:     return 3
         case .behemoth: return 6
+        case .cruiser:  return 5
+        case .carrier:  return 10
         }
     }
 
@@ -295,6 +306,8 @@ enum EnemyType: String, CaseIterable, Identifiable {
         case .drone:    return 10
         case .wisp:     return 14
         case .behemoth: return 30
+        case .cruiser:  return 24
+        case .carrier:  return 50
         }
     }
 
@@ -302,7 +315,17 @@ enum EnemyType: String, CaseIterable, Identifiable {
     var isInvisible: Bool { self == .wisp }
 
     /// Robotic enemies take double damage from EMP attacks.
-    var isRobotic: Bool { self == .drone }
+    /// The whole warship class is mechanical, so EMP weaponry shines against them.
+    var isRobotic: Bool { self == .drone || self == .cruiser || self == .carrier }
+
+    /// Enemies released onto the track when this unit is destroyed.
+    /// Dropships burst open into a small escort wing mid-corridor.
+    var escortPayload: [EnemyType] {
+        switch self {
+        case .carrier: return [.drone, .drone, .pod, .pod]
+        default:       return []
+        }
+    }
 
     /// Body radius for the programmatic chassis.
     var radius: CGFloat {
@@ -312,6 +335,8 @@ enum EnemyType: String, CaseIterable, Identifiable {
         case .drone:    return 14
         case .wisp:     return 15
         case .behemoth: return 24
+        case .cruiser:  return 20
+        case .carrier:  return 30
         }
     }
 
@@ -323,6 +348,8 @@ enum EnemyType: String, CaseIterable, Identifiable {
         case .drone:    return SKColorCompatible(red: 0.65, green: 0.70, blue: 0.78, alpha: 1.0)
         case .wisp:     return SKColorCompatible(red: 0.62, green: 0.40, blue: 0.95, alpha: 1.0)
         case .behemoth: return SKColorCompatible(red: 0.85, green: 0.15, blue: 0.35, alpha: 1.0)
+        case .cruiser:  return SKColorCompatible(red: 0.95, green: 0.55, blue: 0.20, alpha: 1.0)
+        case .carrier:  return SKColorCompatible(red: 0.58, green: 0.62, blue: 0.74, alpha: 1.0)
         }
     }
 
